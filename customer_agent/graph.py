@@ -12,9 +12,12 @@ via a closure — these are bound per-request in agent_executor.py.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
+from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
+from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from common.llm import get_llm
@@ -50,19 +53,7 @@ def build_graph(trace_id: str, context_id: str, depth: int) -> Any:
         A compiled LangGraph agent.
     """
 
-    @tool
-    async def delegate_to_legal_agent(question: str) -> str:
-        """Send a legal question to the Law Agent for comprehensive analysis.
-
-        The Law Agent will coordinate Tax and Compliance sub-agents in parallel
-        and return a synthesised response covering all relevant legal dimensions.
-
-        Args:
-            question: The legal question to analyse.
-
-        Returns:
-            A comprehensive legal analysis from the multi-agent system.
-        """
+    async def _delegate(question: str) -> str:
         from common.a2a_client import delegate
         from common.registry_client import discover
 
@@ -86,6 +77,33 @@ def build_graph(trace_id: str, context_id: str, depth: int) -> Any:
         except Exception as exc:
             logger.exception("delegate_to_legal_agent failed: %s", exc)
             return f"Could not reach the Law Agent: {exc}"
+
+    if os.getenv("LAB_OFFLINE_MODE") == "1":
+        async def offline_customer_node(state: dict) -> dict:
+            question = state["messages"][-1].content
+            result = await _delegate(question)
+            return {"messages": [AIMessage(content=result)]}
+
+        graph = StateGraph(dict)
+        graph.add_node("offline_customer", offline_customer_node)
+        graph.add_edge(START, "offline_customer")
+        graph.add_edge("offline_customer", END)
+        return graph.compile()
+
+    @tool
+    async def delegate_to_legal_agent(question: str) -> str:
+        """Send a legal question to the Law Agent for comprehensive analysis.
+
+        The Law Agent will coordinate Tax and Compliance sub-agents in parallel
+        and return a synthesised response covering all relevant legal dimensions.
+
+        Args:
+            question: The legal question to analyse.
+
+        Returns:
+            A comprehensive legal analysis from the multi-agent system.
+        """
+        return await _delegate(question)
 
     llm = get_llm()
     graph = create_react_agent(

@@ -2,4 +2,6 @@
 .env
 **cache**
 .claude
+logs/
 **SOLUTION**
+!exercises/SOLUTIONS.md

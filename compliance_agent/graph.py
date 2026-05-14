@@ -6,6 +6,10 @@ No tools — it answers purely from LLM knowledge.
 
 from __future__ import annotations
 
+import os
+
+from langchain_core.messages import AIMessage
+from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from common.llm import get_llm
@@ -39,6 +43,26 @@ should consult a licensed attorney for specific compliance advice.
 
 def create_graph():
     """Return a compiled LangGraph create_react_agent for compliance questions."""
+    if os.getenv("LAB_OFFLINE_MODE") == "1":
+        def offline_compliance_node(state: dict) -> dict:
+            return {
+                "messages": [
+                    AIMessage(
+                        content=(
+                            "Offline compliance analysis: relevant risks include regulatory "
+                            "reporting duties, internal-control failures, governance exposure, "
+                            "and remediation obligations under applicable compliance frameworks."
+                        )
+                    )
+                ]
+            }
+
+        graph = StateGraph(dict)
+        graph.add_node("offline_compliance", offline_compliance_node)
+        graph.add_edge(START, "offline_compliance")
+        graph.add_edge("offline_compliance", END)
+        return graph.compile()
+
     llm = get_llm()
     graph = create_react_agent(
         model=llm,
